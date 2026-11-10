@@ -1,0 +1,1223 @@
+{
+  "version": 1,
+  "source": "DESIGN.md section 11.3 (S1-S17), plus the base URL requirement (BU*)",
+  "constants": {
+    "api_key": "raskai_test_key_AcceptanceHarnessTestKeyNotARealCredentialDoNotUs",
+    "env_api_key": "raskai_test_key_EnvironmentKeyThatMustLoseToTheConstructorArgumnt",
+    "live_base_url": "https://api.rask.ai/v3",
+    "uuid4": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    "upload_sha256": "c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193",
+    "etag_a": "\"s-a197265875140819\"",
+    "etag_b": "\"s-6a45f87e138e55ae\"",
+    "etag_speaker": "\"v-1a2b3c4d5e6f7a8b\"",
+    "etag_settings": "\"ts-9f2c4a1b7e3d5f60\""
+  },
+  "defaults": {
+    "languages": ["go", "python", "typescript", "php", "java"],
+    "client": {
+      "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}" },
+      "env": {}
+    }
+  },
+  "scenarios": [
+    {
+      "id": "S1.key-argument",
+      "design": ["S1"],
+      "title": "The api_key argument travels as Authorization: Bearer",
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 },
+        { "assert": "header", "where": { "operationId": "getMe" }, "name": "Authorization", "equals": "Bearer {{api_key}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S1.key-env",
+      "design": ["S1"],
+      "title": "RASK_API_KEY supplies the key when no argument does",
+      "client": { "args": { "base_url": "{{base_url}}" }, "env": { "RASK_API_KEY": "{{api_key}}" } },
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "getMe" }, "name": "Authorization", "equals": "Bearer {{api_key}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S1.argument-beats-env",
+      "design": ["S1"],
+      "title": "The argument wins over RASK_API_KEY",
+      "client": { "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}" }, "env": { "RASK_API_KEY": "{{env_api_key}}" } },
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "getMe" }, "name": "Authorization", "equals": "Bearer {{api_key}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S1.key-missing",
+      "design": ["S1"],
+      "title": "No key at all: a clear error naming RASK_API_KEY, before any request",
+      "client": { "args": { "base_url": "{{base_url}}" }, "env": {} },
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "raised_before_network", "message_contains": "RASK_API_KEY" }]
+    },
+    {
+      "id": "S1.key-redacted",
+      "design": ["S1"],
+      "title": "The key does not show in repr, toString or the client's logs",
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "repr_redacts", "secret": "{{api_key}}" }]
+    },
+    {
+      "id": "S2.default-base-url",
+      "design": ["S2"],
+      "title": "The default base URL is https://api.rask.ai/v3",
+      "note": "Read it from the client's configuration. Never send a request here: the default points at production.",
+      "client": { "args": { "api_key": "{{api_key}}" }, "env": {} },
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "config", "field": "base_url", "equals": "{{live_base_url}}" }]
+    },
+    {
+      "id": "BU1.path-prefix",
+      "design": ["S2", "base_url"],
+      "title": "base_url argument with a path prefix: every request stays under the prefix",
+      "note": "URL resolution of a path starting with \"/\" (new URL, urljoin, URI.resolve, Guzzle base_uri) silently drops the prefix.",
+      "calls": [
+        { "op": "getMe" },
+        { "op": "listProjects", "query": { "limit": 5 } },
+        { "op": "getProject", "path": { "project_id": "prj-bu1" } },
+        { "op": "createFolder", "body": { "name": "BU1" } }
+      ],
+      "wire": [
+        { "assert": "path", "where": { "operationId": "getMe" }, "equals": "{{prefix}}/me" },
+        { "assert": "path", "where": { "operationId": "listProjects" }, "equals": "{{prefix}}/projects" },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "name": "limit", "equals": "5" },
+        { "assert": "path", "where": { "operationId": "getProject" }, "equals": "{{prefix}}/projects/prj-bu1" },
+        { "assert": "path", "where": { "operationId": "createFolder" }, "equals": "{{prefix}}/folders" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "returned", "call": 3 }]
+    },
+    {
+      "id": "BU2.trailing-slash",
+      "design": ["S2", "base_url"],
+      "title": "A base_url ending in \"/\" produces the same paths, with no double slash",
+      "client": { "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}/" }, "env": {} },
+      "calls": [
+        { "op": "getMe" },
+        { "op": "getProject", "path": { "project_id": "prj-bu2" } }
+      ],
+      "wire": [
+        { "assert": "path", "where": { "operationId": "getMe" }, "equals": "{{prefix}}/me" },
+        { "assert": "path", "where": { "operationId": "getProject" }, "equals": "{{prefix}}/projects/prj-bu2" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "BU3.env-var",
+      "design": ["S2", "base_url"],
+      "title": "RASK_BASE_URL supplies the base URL when no argument does",
+      "client": { "args": { "api_key": "{{api_key}}" }, "env": { "RASK_BASE_URL": "{{base_url}}" } },
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 },
+        { "assert": "path", "where": { "operationId": "getMe" }, "equals": "{{prefix}}/me" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "config", "field": "base_url", "equals": "{{base_url}}" }]
+    },
+    {
+      "id": "BU3.env-var-trailing-slash",
+      "design": ["S2", "base_url"],
+      "title": "RASK_BASE_URL ending in \"/\" works the same",
+      "client": { "args": { "api_key": "{{api_key}}" }, "env": { "RASK_BASE_URL": "{{base_url}}/" } },
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "path", "where": { "operationId": "getMe" }, "equals": "{{prefix}}/me" }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "BU4.argument-beats-env",
+      "design": ["S2", "base_url"],
+      "title": "The base_url argument wins over RASK_BASE_URL",
+      "client": { "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}" }, "env": { "RASK_BASE_URL": "{{other_base_url}}/v3" } },
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "listener": "other" }, "equals": 0 },
+        { "assert": "count", "where": { "listener": "api", "operationId": "getMe" }, "equals": 1 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "BU5.no-key-on-redirect-get",
+      "design": ["base_url", "S1"],
+      "title": "A GET redirected to another host does not carry the key there",
+      "note": "Following without Authorization and refusing to follow both pass. Same-hostname, other-port leaks count too: the other listener has another host name AND port.",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "redirect": { "to": "other", "status": 307 } }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "header", "where": { "listener": "api", "operationId": "getMe" }, "name": "Authorization", "equals": "Bearer {{api_key}}" },
+        { "assert": "count", "where": { "listener": "other" }, "at_most": 1 },
+        { "assert": "header", "where": { "listener": "other" }, "name": "Authorization", "absent": true, "only_if_any": true }
+      ],
+      "expect_sdk": [{ "kind": "returned_or_raised", "call": 0 }]
+    },
+    {
+      "id": "BU5.no-key-on-redirect-post",
+      "design": ["base_url", "S1"],
+      "title": "A POST redirected to another host does not carry the key there",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "redirect": { "to": "other", "status": 307 } }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "BU5" } }],
+      "wire": [
+        { "assert": "header", "where": { "listener": "api", "operationId": "createFolder" }, "name": "Authorization", "equals": "Bearer {{api_key}}" },
+        { "assert": "count", "where": { "listener": "other" }, "at_most": 1 },
+        { "assert": "header", "where": { "listener": "other" }, "name": "Authorization", "absent": true, "only_if_any": true }
+      ],
+      "expect_sdk": [{ "kind": "returned_or_raised", "call": 0 }]
+    },
+    {
+      "id": "BU6.presigned-put-no-authorization",
+      "design": ["base_url", "S7"],
+      "title": "The presigned PUT goes to the storage host without Authorization; the API calls keep it",
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "bu6.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "__storage_put" }, "name": "Authorization", "absent": true },
+        { "assert": "count", "where": { "operationId": "__storage_put", "status": 200 }, "equals": 1 },
+        { "assert": "header", "where": { "operationId": "createUpload" }, "name": "Authorization", "equals": "Bearer {{api_key}}" },
+        { "assert": "header", "where": { "operationId": "completeUpload" }, "name": "Authorization", "equals": "Bearer {{api_key}}" },
+        { "assert": "path", "where": { "operationId": "completeUpload" }, "matches": "^{{prefix}}/uploads/[^/]+/complete$" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "BU7.path-absolute-links-under-prefix",
+      "design": ["base_url", "S6"],
+      "title": "Location and links.* say /v3/...: following them must stay under a custom prefix",
+      "note": "The contract's links are path-absolute with /v3 (DESIGN 4.2). Against a custom prefix an SDK that resolves them on the origin leaves the API. Take the id, or re-root the link under base_url.",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-bu7", "type": "dub", "states": ["queued", "succeeded"] } },
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createDub", "steps": [{ "job": "job-bu7" }] } }
+      ],
+      "calls": [
+        { "op": "createDub", "path": { "project_id": "prj-bu7" }, "body": { "mode": "auto", "expected_cost_minutes": 1 } },
+        { "helper": "jobs.wait", "job_id_from_call": 0 }
+      ],
+      "wire": [
+        { "assert": "header", "where": { "listener": "api", "operationId": "createDub" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "path", "where": { "operationId": "getJob" }, "equals": "{{prefix}}/jobs/job-bu7" }
+      ],
+      "expect_sdk": [
+        { "kind": "header_exposed", "call": 0, "name": "Location", "equals": "/v3/jobs/job-bu7" },
+        { "kind": "returned", "call": 1 }
+      ]
+    },
+    {
+      "id": "S3.retry-429-honours-retry-after",
+      "design": ["S3"],
+      "title": "429 is retried, no sooner than Retry-After",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "problem": "rate_limited", "retry_after": 2 }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getMe" }, "equals": 2 },
+        { "assert": "gap_at_least_ms", "where": { "operationId": "getMe" }, "between": [0, 1], "ms": 1950 },
+        { "assert": "status", "where": { "operationId": "getMe" }, "nth": -1, "equals": 200 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.retry-502-503-504",
+      "design": ["S3"],
+      "title": "502, 503 and 504 are retried with backoff, even when the body is HTML",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "status": 502 }, { "status": 504 }, { "status": 503, "retry_after": null }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getMe" }, "equals": 4 },
+        { "assert": "total_gap_at_least_ms", "where": { "operationId": "getMe" }, "ms": 300 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.retry-connection-errors",
+      "design": ["S3"],
+      "title": "A connection dropped before the headers or in mid-body is retried",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "drop": "before_headers" }, { "drop": "mid_body" }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 3 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.retry-timeout",
+      "design": ["S3", "S13"],
+      "title": "A request that times out is retried",
+      "client": { "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}", "timeout_seconds": 1 }, "env": {} },
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "delay_ms": 2500 }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 2 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.retry-post-same-key",
+      "design": ["S3", "S4"],
+      "title": "A POST is retried because it carries a key; the key and the body do not change",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "status": 503, "problem": "temporarily_unavailable", "retry_after": 1 }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "S3" } }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "createFolder" }, "equals": 2 },
+        { "assert": "same", "where": { "operationId": "createFolder" }, "field": "header:Idempotency-Key" },
+        { "assert": "same", "where": { "operationId": "createFolder" }, "field": "body_sha256" },
+        { "assert": "header", "where": { "operationId": "createFolder" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.retry-delete",
+      "design": ["S3"],
+      "title": "A DELETE is retried because a repeat returns 204, and carries no key",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "deleteProject", "steps": [{ "status": 503, "problem": "temporarily_unavailable", "retry_after": 1 }] } }
+      ],
+      "calls": [{ "op": "deleteProject", "path": { "project_id": "prj-s3" } }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "deleteProject" }, "equals": 2 },
+        { "assert": "header", "where": { "operationId": "deleteProject" }, "name": "Idempotency-Key", "absent": true },
+        { "assert": "status", "where": { "operationId": "deleteProject" }, "nth": -1, "equals": 204 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.no-retry-500",
+      "design": ["S3", "S9"],
+      "title": "500 is not retried",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "internal_error", "repeat": "forever" }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "S3" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createFolder" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 500, "code": "internal_error" }]
+    },
+    {
+      "id": "S3.no-retry-409-state",
+      "design": ["S3", "S9"],
+      "title": "A 409 state conflict is not retried",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "updateSegment", "steps": [{ "problem": "project_not_ready", "repeat": "forever" }] } }
+      ],
+      "calls": [
+        { "op": "updateSegment", "path": { "project_id": "prj-s3", "segment_id": "seg-s3" }, "if_match": "{{etag_a}}", "body": { "translation_text": "Hola" } }
+      ],
+      "wire": [{ "assert": "count", "where": { "operationId": "updateSegment" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 409, "code": "project_not_ready" }]
+    },
+    {
+      "id": "S3.key-in-use-retried",
+      "design": ["S3"],
+      "title": "409 idempotency_key_in_use is retried after Retry-After with the same key",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "idempotency_key_in_use", "retry_after": 1, "repeat": 2 }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "S3" } }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "createFolder" }, "equals": 3 },
+        { "assert": "same", "where": { "operationId": "createFolder" }, "field": "header:Idempotency-Key" },
+        { "assert": "gap_at_least_ms", "where": { "operationId": "createFolder" }, "between": [0, 1], "ms": 950 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S3.key-in-use-gives-up",
+      "design": ["S3", "S9"],
+      "title": "idempotency_key_in_use is retried at most 3 times, then raised",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "idempotency_key_in_use", "retry_after": 1, "repeat": "forever" }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "S3" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createFolder" }, "equals": 4 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 409, "code": "idempotency_key_in_use" }]
+    },
+    {
+      "id": "S3.total-budget",
+      "design": ["S3"],
+      "title": "A service that stays down: retrying stops within 120 s",
+      "slow": true,
+      "note": "Takes about two minutes. Run it nightly, or with the SDK's clock compressed if it has one.",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "status": 503, "problem": "temporarily_unavailable", "retry_after": 1, "repeat": "forever" }] } }
+      ],
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getMe" }, "at_least": 3 },
+        { "assert": "total_gap_at_most_ms", "where": { "operationId": "getMe" }, "ms": 122000 }
+      ],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 503, "code": "temporarily_unavailable" }]
+    },
+    {
+      "id": "S4.key-is-uuid4",
+      "design": ["S4"],
+      "title": "POST, PATCH and PUT each send a UUIDv4 Idempotency-Key the caller did not ask for",
+      "calls": [
+        { "op": "createFolder", "body": { "name": "S4" } },
+        { "op": "updateFolder", "path": { "folder_id": "fld-s4" }, "body": { "name": "S4b" } },
+        { "op": "updateSpeakerVoice", "path": { "project_id": "prj-s4", "speaker_id": "SPEAKER_00" }, "if_match": "{{etag_speaker}}", "body": { "voice_id": "voice-1" } }
+      ],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "createFolder" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "header", "where": { "operationId": "updateFolder" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "header", "where": { "operationId": "updateSpeakerVoice" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 2 }]
+    },
+    {
+      "id": "S4.key-fresh-per-call",
+      "design": ["S4"],
+      "title": "Two logical calls send two different keys",
+      "calls": [
+        { "op": "createFolder", "body": { "name": "S4" } },
+        { "op": "createFolder", "body": { "name": "S4" } }
+      ],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "createFolder" }, "equals": 2 },
+        { "assert": "distinct", "where": { "operationId": "createFolder" }, "field": "header:Idempotency-Key" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 1 }]
+    },
+    {
+      "id": "S4.key-stable-across-retries",
+      "design": ["S4"],
+      "title": "POST, PATCH and PUT keep their key across retries",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "temporarily_unavailable", "retry_after": 1 }] } },
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "updateFolder", "steps": [{ "status": 502 }] } },
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "updateSpeakerVoice", "steps": [{ "drop": true }] } }
+      ],
+      "calls": [
+        { "op": "createFolder", "body": { "name": "S4" } },
+        { "op": "updateFolder", "path": { "folder_id": "fld-s4" }, "body": { "name": "S4b" } },
+        { "op": "updateSpeakerVoice", "path": { "project_id": "prj-s4", "speaker_id": "SPEAKER_00" }, "if_match": "{{etag_speaker}}", "body": { "voice_id": "voice-1" } }
+      ],
+      "wire": [
+        { "assert": "same", "where": { "operationId": "createFolder" }, "field": "header:Idempotency-Key" },
+        { "assert": "same", "where": { "operationId": "updateFolder" }, "field": "header:Idempotency-Key" },
+        { "assert": "same", "where": { "operationId": "updateSpeakerVoice" }, "field": "header:Idempotency-Key" },
+        { "assert": "same", "where": { "operationId": "updateSpeakerVoice" }, "field": "header:If-Match" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 2 }]
+    },
+    {
+      "id": "S4.caller-override",
+      "design": ["S4"],
+      "title": "A key the caller passes is sent verbatim, also on retries",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "temporarily_unavailable", "retry_after": 1 }] } }
+      ],
+      "calls": [{ "op": "createFolder", "body": { "name": "S4" }, "idempotency_key": "caller-key-0001" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "createFolder" }, "equals": 2 },
+        { "assert": "header", "where": { "operationId": "createFolder" }, "name": "Idempotency-Key", "equals": "caller-key-0001" }
+      ],
+      "expect_sdk": [{ "kind": "idempotency_key_exposed", "call": 0, "equals": "caller-key-0001" }]
+    },
+    {
+      "id": "S4.key-exposed-on-results-and-errors",
+      "design": ["S4"],
+      "title": "The key that was sent is readable on a result and on an error",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{}, { "problem": "validation_failed" }] } }
+      ],
+      "calls": [
+        { "op": "createFolder", "body": { "name": "S4" } },
+        { "op": "createFolder", "body": { "name": "S4" } }
+      ],
+      "wire": [{ "assert": "count", "where": { "operationId": "createFolder" }, "equals": 2 }],
+      "expect_sdk": [
+        { "kind": "idempotency_key_exposed", "call": 0, "matches_wire": true },
+        { "kind": "idempotency_key_exposed", "call": 1, "matches_wire": true }
+      ]
+    },
+    {
+      "id": "S4.delete-segment-keyed",
+      "design": ["S4"],
+      "title": "deleteSegment carries a key, stable across retries; other DELETEs and GETs carry none",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "deleteSegment", "steps": [{ "problem": "temporarily_unavailable", "retry_after": 1 }] } }
+      ],
+      "calls": [
+        { "op": "deleteSegment", "path": { "project_id": "prj-s4", "segment_id": "seg-s4" }, "if_match": "{{etag_a}}" },
+        { "op": "deleteFolder", "path": { "folder_id": "fld-s4" } },
+        { "op": "getMe" }
+      ],
+      "wire": [
+        { "assert": "same", "where": { "operationId": "deleteSegment" }, "field": "header:Idempotency-Key" },
+        { "assert": "header", "where": { "operationId": "deleteSegment" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "header", "where": { "operationId": "deleteFolder" }, "name": "Idempotency-Key", "absent": true },
+        { "assert": "header", "where": { "operationId": "getMe" }, "name": "Idempotency-Key", "absent": true }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S4.required-key-operations",
+      "design": ["S4"],
+      "title": "Operations that require a key get one without the caller's help",
+      "calls": [
+        { "op": "createProject", "body": { "media_id": "med-s4", "target_language": "es-es", "expected_cost_minutes": 1 } },
+        { "op": "createSegment", "path": { "project_id": "prj-s4" }, "body": { "start_seconds": 1.0, "end_seconds": 2.0, "speaker_id": "SPEAKER_01", "source_text": "Thanks!" } },
+        { "op": "restoreTranscriptVersion", "path": { "project_id": "prj-s4", "version_number": 7 } }
+      ],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "createProject" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "header", "where": { "operationId": "createSegment" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" },
+        { "assert": "header", "where": { "operationId": "restoreTranscriptVersion" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 2 }]
+    },
+    {
+      "id": "S5.auto-paging",
+      "design": ["S5"],
+      "title": "An auto-paging iterator walks 3 pages over next_cursor",
+      "setup": [
+        { "method": "POST", "path": "/__control/pages", "body": { "operationId": "listProjects", "pages": 3, "page_size": 2 } }
+      ],
+      "calls": [{ "helper": "iterate", "op": "listProjects", "query": { "limit": 2 } }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "listProjects" }, "equals": 3 },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "nth": 0, "name": "cursor", "absent": true },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "nth": 1, "name": "cursor", "present": true },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "nth": 2, "name": "cursor", "present": true },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "name": "limit", "equals": "2" }
+      ],
+      "expect_sdk": [
+        { "kind": "items", "call": 0, "ids": ["listProjects-item-1", "listProjects-item-2", "listProjects-item-3", "listProjects-item-4", "listProjects-item-5", "listProjects-item-6"] }
+      ]
+    },
+    {
+      "id": "S5.page-level-access",
+      "design": ["S5"],
+      "title": "Page-level access: one page, its next_cursor and has_more, and the next page only on request",
+      "setup": [
+        { "method": "POST", "path": "/__control/pages", "body": { "operationId": "listProjects", "pages": 3, "page_size": 2 } }
+      ],
+      "calls": [
+        { "helper": "first_page", "op": "listProjects", "query": { "limit": 2 } },
+        { "helper": "next_page", "after_call": 0 }
+      ],
+      "wire": [{ "assert": "count", "where": { "operationId": "listProjects" }, "equals": 2 }],
+      "expect_sdk": [
+        { "kind": "pages", "call": 0, "item_count": 2, "has_more": true },
+        { "kind": "pages", "call": 1, "item_count": 2, "has_more": true }
+      ]
+    },
+    {
+      "id": "S5.short-and-empty-pages",
+      "design": ["S5"],
+      "title": "A short or empty page with has_more does not end the iteration",
+      "note": "DESIGN 4.5: lists that filter after the query may return fewer than limit items with has_more.",
+      "setup": [
+        { "method": "POST", "path": "/__control/pages", "body": { "operationId": "listSegments", "sizes": [2, 0, 1] } }
+      ],
+      "calls": [{ "helper": "iterate", "op": "listSegments", "path": { "project_id": "prj-s5" }, "query": { "limit": 2, "q": "hola" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "listSegments" }, "equals": 3 }],
+      "expect_sdk": [{ "kind": "items", "call": 0, "ids": ["listSegments-item-1", "listSegments-item-2", "listSegments-item-3"] }]
+    },
+    {
+      "id": "S5.filters-kept",
+      "design": ["S5"],
+      "title": "Every page repeats the same filters; the harness answers 400 invalid_cursor otherwise",
+      "setup": [
+        { "method": "POST", "path": "/__control/pages", "body": { "operationId": "listProjects", "pages": 2, "page_size": 1 } }
+      ],
+      "calls": [{ "helper": "iterate", "op": "listProjects", "query": { "name_contains": "q3", "limit": 1 } }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "listProjects" }, "equals": 2 },
+        { "assert": "query", "where": { "operationId": "listProjects" }, "name": "name_contains", "equals": "q3" }
+      ],
+      "expect_sdk": [{ "kind": "items", "call": 0, "count": 2 }]
+    },
+    {
+      "id": "S5.last-page-stops",
+      "design": ["S5"],
+      "title": "A single page with next_cursor null needs one request",
+      "setup": [
+        { "method": "POST", "path": "/__control/pages", "body": { "operationId": "listProjects", "sizes": [1] } }
+      ],
+      "calls": [{ "helper": "iterate", "op": "listProjects" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "listProjects" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "items", "call": 0, "count": 1 }]
+    },
+    {
+      "id": "S6.wait-succeeds",
+      "design": ["S6"],
+      "title": "jobs.wait loops wait_seconds=20, honours Retry-After, and returns the succeeded job",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["queued", "running", "succeeded"], "retry_after": 1 } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getJob" }, "equals": 3 },
+        { "assert": "query", "where": { "operationId": "getJob" }, "name": "wait_seconds", "equals": "20" },
+        { "assert": "gap_at_least_ms", "where": { "operationId": "getJob" }, "between": [0, 1], "ms": 950 },
+        { "assert": "gap_at_least_ms", "where": { "operationId": "getJob" }, "between": [1, 2], "ms": 950 },
+        { "assert": "count", "where": { "operationId": "cancelJob" }, "equals": 0 }
+      ],
+      "expect_sdk": [{ "kind": "field", "call": 0, "path": "/status", "equals": "succeeded" }]
+    },
+    {
+      "id": "S6.wait-failed",
+      "design": ["S6", "S9"],
+      "title": "A failed job raises JobFailedError carrying the job's problem",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["running", "failed"], "retry_after": 1 } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 2 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "error_class": "JobFailedError", "code": "dub_voiceover_failed" }]
+    },
+    {
+      "id": "S6.wait-canceled",
+      "design": ["S6", "S9"],
+      "title": "A canceled job raises JobCanceledError",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["running", "canceled"], "retry_after": 1 } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 2 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "error_class": "JobCanceledError" }]
+    },
+    {
+      "id": "S6.wait-timeout",
+      "design": ["S6"],
+      "title": "A job that outlives the timeout raises WaitTimeoutError and is left running",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["running"], "retry_after": 1 } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6", "timeout_seconds": 2 }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getJob" }, "at_least": 1 },
+        { "assert": "count", "where": { "operationId": "cancelJob" }, "equals": 0 }
+      ],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "error_class": "WaitTimeoutError" }]
+    },
+    {
+      "id": "S6.default-timeout",
+      "design": ["S6"],
+      "title": "jobs.wait defaults to 14400 s",
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "config", "field": "jobs.wait.timeout_seconds", "equals": 14400 }]
+    },
+    {
+      "id": "S6.survives-retryable-errors",
+      "design": ["S6", "S3"],
+      "title": "A 503 or a dropped connection during the wait does not end the wait",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["running", "succeeded"], "retry_after": 1 } },
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getJob", "steps": [{ "problem": "temporarily_unavailable", "retry_after": 1 }, { "drop": true }] } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getJob" }, "at_least": 4 },
+        { "assert": "status", "where": { "operationId": "getJob" }, "nth": -1, "equals": 200 }
+      ],
+      "expect_sdk": [{ "kind": "field", "call": 0, "path": "/status", "equals": "succeeded" }]
+    },
+    {
+      "id": "S6.not-modified",
+      "design": ["S6"],
+      "title": "An SDK that sends If-None-Match gets 304 and keeps waiting",
+      "note": "304 has no body. An SDK that does not send If-None-Match never sees it and passes by polling.",
+      "setup": [
+        { "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s6", "type": "dub", "states": ["running", "running", "succeeded"], "retry_after": 1 } }
+      ],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s6" }],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getJob" }, "equals": 3 },
+        { "assert": "status", "where": { "operationId": "getJob" }, "nth": -1, "equals": 200 }
+      ],
+      "expect_sdk": [{ "kind": "field", "call": 0, "path": "/status", "equals": "succeeded" }]
+    },
+    {
+      "id": "S7.happy-path",
+      "design": ["S7"],
+      "title": "upload_file: createUpload, one PUT with the signed headers, completeUpload",
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" }, "on_progress": true }
+      ],
+      "wire": [
+        { "assert": "order", "sequence": ["createUpload", "__storage_put", "completeUpload"] },
+        { "assert": "count", "where": { "operationId": "__storage_put" }, "equals": 1 },
+        { "assert": "header", "where": { "operationId": "__storage_put" }, "name": "Content-Type", "equals": "video/mp4" },
+        { "assert": "header", "where": { "operationId": "__storage_put" }, "name": "Content-Length", "equals": "4096" },
+        { "assert": "header", "where": { "operationId": "__storage_put" }, "name": "Authorization", "absent": true },
+        { "assert": "field", "where": { "operationId": "__storage_put" }, "field": "body_sha256", "equals": "{{upload_sha256}}" },
+        { "assert": "body", "where": { "operationId": "createUpload" }, "pointer": "/size_bytes", "equals": 4096 },
+        { "assert": "header", "where": { "operationId": "completeUpload" }, "name": "Idempotency-Key", "matches": "{{uuid4}}" }
+      ],
+      "expect_sdk": [
+        { "kind": "returned", "call": 0 },
+        { "kind": "progress", "call": 0, "final_bytes": 4096 }
+      ]
+    },
+    {
+      "id": "S7.stream-input",
+      "design": ["S7"],
+      "title": "upload_file also takes a stream, sent with the signed Content-Length",
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "stream", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "__storage_put", "status": 200 }, "equals": 1 },
+        { "assert": "header", "where": { "operationId": "__storage_put" }, "name": "Content-Length", "equals": "4096" },
+        { "assert": "field", "where": { "operationId": "__storage_put" }, "field": "body_sha256", "equals": "{{upload_sha256}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S7.put-retried-whole-file",
+      "design": ["S7"],
+      "title": "A failed PUT is retried with the whole file",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "__storage_put", "steps": [{ "status": 503 }, { "drop": true }] } }
+      ],
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "__storage_put" }, "equals": 3 },
+        { "assert": "field", "where": { "operationId": "__storage_put" }, "field": "body_sha256", "equals": "{{upload_sha256}}" },
+        { "assert": "count", "where": { "operationId": "completeUpload" }, "equals": 1 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S7.put-gives-up",
+      "design": ["S7"],
+      "title": "After 3 whole-file retries the PUT is given up and the upload is not completed",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "__storage_put", "steps": [{ "status": 503, "repeat": "forever" }] } }
+      ],
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "__storage_put" }, "equals": 4 },
+        { "assert": "count", "where": { "operationId": "completeUpload" }, "equals": 0 }
+      ],
+      "expect_sdk": [{ "kind": "raised", "call": 0 }]
+    },
+    {
+      "id": "S7.expired-url-in-flight",
+      "design": ["S7"],
+      "title": "Storage says the URL expired: re-sign through getUpload and PUT to the new URL",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "__storage_put", "steps": [{ "expired": true }] } }
+      ],
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "order", "sequence": ["createUpload", "__storage_put", "getUpload", "__storage_put", "completeUpload"] },
+        { "assert": "count", "where": { "operationId": "getUpload" }, "equals": 1 },
+        { "assert": "distinct", "where": { "operationId": "__storage_put" }, "field": "url" },
+        { "assert": "status", "where": { "operationId": "__storage_put" }, "nth": -1, "equals": 200 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S7.expired-url-at-create",
+      "design": ["S7"],
+      "title": "A URL already past expires_at: re-sign before or after trying it",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createUpload", "steps": [{ "upload": { "expired": true } }] } }
+      ],
+      "calls": [
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s7.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [
+        { "assert": "count", "where": { "operationId": "getUpload" }, "equals": 1 },
+        { "assert": "count", "where": { "operationId": "__storage_put", "status": 200 }, "equals": 1 },
+        { "assert": "count", "where": { "operationId": "completeUpload" }, "equals": 1 }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S8.webhooks-unwrap",
+      "design": ["S8"],
+      "title": "webhooks.unwrap: Later, with webhooks (D6)",
+      "status": "later",
+      "note": "Not part of GA: the contract has no webhook operations yet."
+    },
+    {
+      "id": "S9.problem-fields",
+      "design": ["S9"],
+      "title": "402 raises InsufficientBalanceError with every Problem member and the balance members",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "createDub", "steps": [{ "problem": "insufficient_balance" }] } }
+      ],
+      "calls": [{ "op": "createDub", "path": { "project_id": "prj-s9" }, "body": { "mode": "auto", "expected_cost_minutes": 1 } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createDub" }, "equals": 1 }],
+      "expect_sdk": [
+        {
+          "kind": "raised",
+          "call": 0,
+          "error_class": "InsufficientBalanceError",
+          "status": 402,
+          "code": "insufficient_balance",
+          "request_id_matches_wire": true,
+          "fields": {
+            "type": "https://docs.api.rask.ai/errors/insufficient_balance",
+            "title": "Insufficient balance",
+            "retryable": false,
+            "retry": "none",
+            "credit_type": "minutes",
+            "required_minutes": 1,
+            "balance_minutes": 0,
+            "errors": []
+          },
+          "present": ["detail", "hint"]
+        }
+      ]
+    },
+    {
+      "id": "S9.status-400",
+      "design": ["S9"],
+      "title": "400 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "listProjects", "steps": [{ "problem": "invalid_cursor", "repeat": "forever" }] } }],
+      "calls": [{ "op": "listProjects" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "listProjects" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 400, "code": "invalid_cursor" }]
+    },
+    {
+      "id": "S9.status-401",
+      "design": ["S9"],
+      "title": "401 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "problem": "invalid_token", "repeat": "forever" }] } }],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 401, "code": "invalid_token" }]
+    },
+    {
+      "id": "S9.status-403",
+      "design": ["S9"],
+      "title": "403 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "problem": "insufficient_scope", "repeat": "forever" }] } }],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 403, "code": "insufficient_scope", "present": ["required_scopes", "granted_scopes"] }]
+    },
+    {
+      "id": "S9.status-404",
+      "design": ["S9"],
+      "title": "404 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getProject", "steps": [{ "problem": "project_not_found", "repeat": "forever" }] } }],
+      "calls": [{ "op": "getProject", "path": { "project_id": "prj-s9" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getProject" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 404, "code": "project_not_found" }]
+    },
+    {
+      "id": "S9.status-409",
+      "design": ["S9"],
+      "title": "409 cost_changed is raised with its members, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "createDub", "steps": [{ "problem": "cost_changed", "repeat": "forever" }] } }],
+      "calls": [{ "op": "createDub", "path": { "project_id": "prj-s9" }, "body": { "mode": "auto", "expected_cost_minutes": 1 } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createDub" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 409, "code": "cost_changed", "present": ["expected_cost_minutes", "current_cost_minutes"] }]
+    },
+    {
+      "id": "S9.status-410",
+      "design": ["S9"],
+      "title": "410 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "completeUpload", "steps": [{ "problem": "upload_expired", "repeat": "forever" }] } }],
+      "calls": [{ "op": "completeUpload", "path": { "upload_id": "upl-s9" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "completeUpload" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 410, "code": "upload_expired" }]
+    },
+    {
+      "id": "S9.status-413",
+      "design": ["S9"],
+      "title": "413 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "createUpload", "steps": [{ "problem": "media_too_large", "repeat": "forever" }] } }],
+      "calls": [{ "op": "createUpload", "body": { "filename": "s9.mp4", "content_type": "video/mp4", "size_bytes": 1024 } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createUpload" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 413, "code": "media_too_large" }]
+    },
+    {
+      "id": "S9.status-415",
+      "design": ["S9"],
+      "title": "415 is raised, not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "createUpload", "steps": [{ "problem": "unsupported_media_type", "repeat": "forever" }] } }],
+      "calls": [{ "op": "createUpload", "body": { "filename": "s9.mp4", "content_type": "video/mp4", "size_bytes": 1024 } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createUpload" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 415, "code": "unsupported_media_type" }]
+    },
+    {
+      "id": "S9.status-422",
+      "design": ["S9"],
+      "title": "422 is raised with its errors[], not retried",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "problem": "validation_failed", "repeat": "forever" }] } }],
+      "calls": [{ "op": "createFolder", "body": { "name": "S9" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "createFolder" }, "equals": 1 }],
+      "expect_sdk": [
+        {
+          "kind": "raised",
+          "call": 0,
+          "status": 422,
+          "code": "validation_failed",
+          "fields": { "errors": [{ "pointer": "/expected_cost_minutes", "code": "expected_cost_required", "detail": "expected_cost_minutes is required when auto_dub is true." }] }
+        }
+      ]
+    },
+    {
+      "id": "S9.status-429-past-budget",
+      "design": ["S9", "S3"],
+      "title": "429 whose Retry-After outlasts the 120 s budget is raised, with retry_after",
+      "note": "An interpretation of S3: a wait that cannot be honoured within the budget ends the retries at once. Say so if your SDK should differ.",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "problem": "rate_limited", "retry_after": 130, "repeat": "forever" }] } }],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 429, "code": "rate_limited", "fields": { "retry_after": 130, "policy": "credential-minute" } }]
+    },
+    {
+      "id": "S9.status-503-past-budget",
+      "design": ["S9", "S3"],
+      "title": "503 whose Retry-After outlasts the 120 s budget is raised",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getMe", "steps": [{ "problem": "temporarily_unavailable", "retry_after": 130, "repeat": "forever" }] } }],
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getMe" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 503, "code": "temporarily_unavailable" }]
+    },
+    {
+      "id": "S9.unknown-code-preserved",
+      "design": ["S9"],
+      "title": "A problem code the SDK has never seen raises the base error with the code intact",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getProject", "steps": [{ "problem": "s9_brand_new_code", "status": 409, "repeat": "forever" }] } }],
+      "calls": [{ "op": "getProject", "path": { "project_id": "prj-s9" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getProject" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "error_class": "RaskError", "status": 409, "code": "s9_brand_new_code" }]
+    },
+    {
+      "id": "S9.non-json-error",
+      "design": ["S9"],
+      "title": "An error with an HTML body raises the typed error by status, without a parse failure",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getProject", "steps": [{ "status": 404, "raw": "<html><body>Not found</body></html>", "content_type": "text/html", "repeat": "forever" }] } }],
+      "calls": [{ "op": "getProject", "path": { "project_id": "prj-s9" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getProject" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 404 }]
+    },
+    {
+      "id": "S10.etag-exposed",
+      "design": ["S10"],
+      "title": "A resource exposes etag, matching the ETag header",
+      "calls": [{ "op": "getSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getSegment" }, "equals": 1 }],
+      "expect_sdk": [
+        { "kind": "field", "call": 0, "path": "/etag", "present": true },
+        { "kind": "header_exposed", "call": 0, "name": "ETag", "equals_field": "/etag" }
+      ]
+    },
+    {
+      "id": "S10.if-match-sent",
+      "design": ["S10"],
+      "title": "Single-segment mutations, the speaker voice and translation settings send if_match verbatim, quotes included",
+      "calls": [
+        { "op": "updateSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}", "body": { "translation_text": "Hola" } },
+        { "op": "deleteSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}" },
+        { "op": "splitSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}", "body": { "at_seconds": 1.4 } },
+        { "op": "selectTranslationVariant", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}", "body": { "variant_id": "v-1" } },
+        { "op": "updateSpeakerVoice", "path": { "project_id": "prj-s10", "speaker_id": "SPEAKER_00" }, "if_match": "{{etag_speaker}}", "body": { "voice_id": "voice-1" } },
+        { "op": "updateTranslationSettings", "path": { "project_id": "prj-s10" }, "if_match": "{{etag_settings}}", "body": { "glossary_id": "glo-1" } }
+      ],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "updateSegment" }, "name": "If-Match", "equals": "{{etag_a}}" },
+        { "assert": "header", "where": { "operationId": "deleteSegment" }, "name": "If-Match", "equals": "{{etag_a}}" },
+        { "assert": "header", "where": { "operationId": "splitSegment" }, "name": "If-Match", "equals": "{{etag_a}}" },
+        { "assert": "header", "where": { "operationId": "selectTranslationVariant" }, "name": "If-Match", "equals": "{{etag_a}}" },
+        { "assert": "header", "where": { "operationId": "updateSpeakerVoice" }, "name": "If-Match", "equals": "{{etag_speaker}}" },
+        { "assert": "header", "where": { "operationId": "updateTranslationSettings" }, "name": "If-Match", "equals": "{{etag_settings}}" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 5 }]
+    },
+    {
+      "id": "S10.if-match-required-by-the-sdk",
+      "design": ["S10"],
+      "title": "updateSegment without if_match does not compile, or raises before sending",
+      "calls": [{ "op": "updateSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "body": { "translation_text": "Hola" } }],
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "raised_before_network", "message_contains": "if_match" }]
+    },
+    {
+      "id": "S10.if-match-optional-omitted",
+      "design": ["S10"],
+      "title": "updateTranslationSettings without if_match sends none",
+      "calls": [{ "op": "updateTranslationSettings", "path": { "project_id": "prj-s10" }, "body": { "glossary_id": "glo-1" } }],
+      "wire": [{ "assert": "header", "where": { "operationId": "updateTranslationSettings" }, "name": "If-Match", "absent": true }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S10.merge-and-create-send-no-if-match",
+      "design": ["S10"],
+      "title": "mergeSegments carries ETags in its body and createSegment none; neither sends If-Match",
+      "calls": [
+        { "op": "mergeSegments", "path": { "project_id": "prj-s10" }, "body": { "segments": [{ "id": "seg-1", "etag": "{{etag_a}}" }, { "id": "seg-2", "etag": "{{etag_b}}" }] } },
+        { "op": "createSegment", "path": { "project_id": "prj-s10" }, "body": { "start_seconds": 1.0, "end_seconds": 2.0, "speaker_id": "SPEAKER_01", "source_text": "Thanks!" } }
+      ],
+      "wire": [
+        { "assert": "body", "where": { "operationId": "mergeSegments" }, "pointer": "/segments/1/etag", "equals": "{{etag_b}}" },
+        { "assert": "header", "where": { "operationId": "mergeSegments" }, "name": "If-Match", "absent": true },
+        { "assert": "header", "where": { "operationId": "createSegment" }, "name": "If-Match", "absent": true }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 1 }]
+    },
+    {
+      "id": "S10.412-not-retried",
+      "design": ["S10", "S9"],
+      "title": "412 is never retried automatically, and exposes current_etag",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "updateSegment", "steps": [{ "problem": "precondition_failed", "patch": { "current_etag": "{{etag_b}}" }, "repeat": "forever" }] } }],
+      "calls": [{ "op": "updateSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}", "body": { "translation_text": "Hola" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "updateSegment" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 412, "code": "precondition_failed", "fields": { "current_etag": "{{etag_b}}" } }]
+    },
+    {
+      "id": "S10.428-not-retried",
+      "design": ["S10", "S9"],
+      "title": "428 is never retried automatically",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "updateSegment", "steps": [{ "problem": "precondition_required", "repeat": "forever" }] } }],
+      "calls": [{ "op": "updateSegment", "path": { "project_id": "prj-s10", "segment_id": "seg-s10" }, "if_match": "{{etag_a}}", "body": { "translation_text": "Hola" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "updateSegment" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "raised", "call": 0, "status": 428, "code": "precondition_required" }]
+    },
+    {
+      "id": "S11.headers-on-create",
+      "design": ["S11"],
+      "title": "Status, Location, X-Request-Id and Idempotent-Replayed are readable without a second call",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "createFolder", "steps": [{ "headers": { "Idempotent-Replayed": "true" } }] } }],
+      "calls": [{ "op": "createFolder", "body": { "name": "S11" } }],
+      "wire": [{ "assert": "count", "equals": 1 }],
+      "expect_sdk": [
+        { "kind": "field", "call": 0, "raw_status": 201 },
+        { "kind": "header_exposed", "call": 0, "name": "Location", "matches": "^/v3/folders/" },
+        { "kind": "header_exposed", "call": 0, "name": "X-Request-Id", "matches_wire": true },
+        { "kind": "header_exposed", "call": 0, "name": "Idempotent-Replayed", "equals": "true" }
+      ]
+    },
+    {
+      "id": "S11.headers-on-read",
+      "design": ["S11"],
+      "title": "A read exposes ETag and X-Request-Id without a second call",
+      "calls": [{ "op": "getSegment", "path": { "project_id": "prj-s11", "segment_id": "seg-s11" } }],
+      "wire": [{ "assert": "count", "equals": 1 }],
+      "expect_sdk": [
+        { "kind": "field", "call": 0, "raw_status": 200 },
+        { "kind": "header_exposed", "call": 0, "name": "ETag", "equals_field": "/etag" },
+        { "kind": "header_exposed", "call": 0, "name": "X-Request-Id", "matches_wire": true }
+      ]
+    },
+    {
+      "id": "S11.headers-on-error",
+      "design": ["S11", "S9"],
+      "title": "An error exposes its X-Request-Id too",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getProject", "steps": [{ "problem": "project_not_found", "repeat": "forever" }] } }],
+      "calls": [{ "op": "getProject", "path": { "project_id": "prj-s11" } }],
+      "wire": [{ "assert": "count", "equals": 1 }],
+      "expect_sdk": [
+        { "kind": "raised", "call": 0, "status": 404, "request_id_matches_wire": true },
+        { "kind": "header_exposed", "call": 0, "name": "X-Request-Id", "matches_wire": true }
+      ]
+    },
+    {
+      "id": "S12.job-unknown-enum",
+      "design": ["S12"],
+      "title": "Unknown enum values in a job are preserved, not fatal",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getJob", "steps": [{ "inject": { "enum": true } }] } }],
+      "calls": [{ "op": "getJob", "path": { "job_id": "job-s12" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.job-unknown-union-variant",
+      "design": ["S12"],
+      "title": "Unknown union variants in a job are preserved, not fatal",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getJob", "steps": [{ "inject": { "union": true } }] } }],
+      "calls": [{ "op": "getJob", "path": { "job_id": "job-s12" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.job-unknown-field",
+      "design": ["S12"],
+      "title": "Unknown fields in a job are preserved, not fatal",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "getJob", "steps": [{ "inject": { "field": true } }] } }],
+      "calls": [{ "op": "getJob", "path": { "job_id": "job-s12" } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.job-unknown-status-keeps-waiting",
+      "design": ["S12", "S6"],
+      "title": "jobs.wait treats a status it does not know as still running",
+      "setup": [{ "method": "POST", "path": "/__control/jobs", "body": { "id": "job-s12", "type": "dub", "states": ["queued", "s12_future_status", "succeeded"], "retry_after": 1 } }],
+      "calls": [{ "helper": "jobs.wait", "job_id": "job-s12" }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 3 }],
+      "expect_sdk": [{ "kind": "field", "call": 0, "path": "/status", "equals": "succeeded" }]
+    },
+    {
+      "id": "S12.sweep-unknown-enum",
+      "design": ["S12"],
+      "title": "Every operation with a JSON response survives unknown enum values",
+      "note": "Call every operation that GET /__control/operations marks has_json_response, with its sample. Decoding is what is under test.",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "*", "steps": [{ "inject": { "enum": true }, "repeat": "forever" }] } }],
+      "calls": [{ "helper": "sweep_operations" }],
+      "wire": [{ "assert": "count", "at_least": 75 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.sweep-unknown-union-variant",
+      "design": ["S12"],
+      "title": "Every operation with a JSON response survives unknown union variants",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "*", "steps": [{ "inject": { "union": true }, "repeat": "forever" }] } }],
+      "calls": [{ "helper": "sweep_operations" }],
+      "wire": [{ "assert": "count", "at_least": 75 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.sweep-unknown-field",
+      "design": ["S12"],
+      "title": "Every operation with a JSON response survives unknown fields",
+      "setup": [{ "method": "POST", "path": "/__control/script", "body": { "operationId": "*", "steps": [{ "inject": { "field": true }, "repeat": "forever" }] } }],
+      "calls": [{ "helper": "sweep_operations" }],
+      "wire": [{ "assert": "count", "at_least": 75 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }, { "kind": "injected_values_preserved", "call": 0 }]
+    },
+    {
+      "id": "S12.clear-with-empty-string",
+      "design": ["S12"],
+      "title": "Every clearable PATCH field clears with \"\": the SDK sends the empty string, never null, and does not drop it",
+      "calls": [
+        { "op": "updateProject", "path": { "project_id": "prj-s12" }, "body": { "folder_id": "", "metadata": { "crm_id": "" } } },
+        { "op": "updateTranslationSettings", "path": { "project_id": "prj-s12" }, "body": { "translation_instructions": "", "glossary_id": "" } }
+      ],
+      "wire": [
+        { "assert": "body", "where": { "operationId": "updateProject" }, "pointer": "/folder_id", "equals": "" },
+        { "assert": "body", "where": { "operationId": "updateProject" }, "pointer": "/metadata/crm_id", "equals": "" },
+        { "assert": "body", "where": { "operationId": "updateTranslationSettings" }, "pointer": "/translation_instructions", "equals": "" },
+        { "assert": "body", "where": { "operationId": "updateTranslationSettings" }, "pointer": "/glossary_id", "equals": "" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 1 }]
+    },
+    {
+      "id": "S12.omitted-stays-omitted",
+      "design": ["S12"],
+      "title": "A field the caller did not set is omitted: requests never send null",
+      "calls": [{ "op": "updateProject", "path": { "project_id": "prj-s12" }, "body": { "name": "Renamed" } }],
+      "wire": [
+        { "assert": "body", "where": { "operationId": "updateProject" }, "pointer": "/name", "equals": "Renamed" },
+        { "assert": "body", "where": { "operationId": "updateProject" }, "pointer": "/folder_id", "absent": true },
+        { "assert": "body", "where": { "operationId": "updateProject" }, "pointer": "/metadata", "absent": true }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S13.default-timeout",
+      "design": ["S13"],
+      "title": "The default per-request timeout is 60 s",
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "config", "field": "timeout_seconds", "equals": 60 }]
+    },
+    {
+      "id": "S13.default-timeout-covers-long-poll",
+      "design": ["S13"],
+      "title": "A long-poll held for 45 s (25 s budget + 20 s wait) does not time out on the defaults",
+      "slow": true,
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "getJob", "steps": [{ "delay_ms": 45000 }] } }
+      ],
+      "calls": [{ "op": "getJob", "path": { "job_id": "job-s13" }, "query": { "wait_seconds": 20 } }],
+      "wire": [{ "assert": "count", "where": { "operationId": "getJob" }, "equals": 1 }],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S14.warn-once-per-operation",
+      "design": ["S14"],
+      "title": "One warning per operation on the first Deprecation header",
+      "setup": [
+        { "method": "POST", "path": "/__control/script", "body": { "operationId": "*", "steps": [{ "deprecation": true, "repeat": "forever" }] } }
+      ],
+      "calls": [{ "op": "getMe" }, { "op": "getMe" }, { "op": "getBalance" }],
+      "wire": [{ "assert": "count", "equals": 3 }],
+      "expect_sdk": [{ "kind": "warnings", "count": 2, "per_operation": { "getMe": 1, "getBalance": 1 } }]
+    },
+    {
+      "id": "S14.no-warning-without-header",
+      "design": ["S14"],
+      "title": "No Deprecation header, no warning",
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "equals": 1 }],
+      "expect_sdk": [{ "kind": "warnings", "count": 0 }]
+    },
+    {
+      "id": "S14.language-markers",
+      "design": ["S14"],
+      "title": "An operation with deprecated: true gets the language's deprecation marker",
+      "note": "The contract has no deprecated operation yet, so check it by generating from a copy with one marked.",
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [{ "kind": "manual", "text": "@Deprecated (Java), // Deprecated: (Go), @deprecated (TypeScript, PHP docblock, Python typing_extensions.deprecated)." }]
+    },
+    {
+      "id": "S15.user-agent",
+      "design": ["S15"],
+      "title": "User-Agent: rask-sdk-<lang>/<version> <runtime>/<version>",
+      "calls": [{ "op": "getMe" }],
+      "wire": [
+        { "assert": "header", "where": { "operationId": "getMe" }, "name": "User-Agent", "matches": "^rask-sdk-{{lang}}/\\S+ [a-z][a-z0-9.+_-]*/\\S+$" }
+      ],
+      "expect_sdk": [{ "kind": "returned", "call": 0 }]
+    },
+    {
+      "id": "S16.debug-log-redacts",
+      "design": ["S16"],
+      "title": "RASK_LOG=debug logs traffic with Authorization and presigned signatures redacted",
+      "client": { "args": { "api_key": "{{api_key}}", "base_url": "{{base_url}}" }, "env": { "RASK_LOG": "debug" } },
+      "calls": [
+        { "op": "getMe" },
+        { "helper": "uploads.upload_file", "source": "path", "filename": "s16.mp4", "content_type": "video/mp4", "content": { "size_bytes": 4096, "fill": "index_mod_256" } }
+      ],
+      "wire": [{ "assert": "count", "where": { "operationId": "__storage_put", "status": 200 }, "equals": 1 }],
+      "expect_sdk": [
+        {
+          "kind": "logs",
+          "must_contain": ["/me", "/storage/"],
+          "must_not_contain": ["{{api_key}}"],
+          "must_not_contain_wire": [{ "operationId": "__storage_put", "query": "X-Amz-Signature" }]
+        }
+      ]
+    },
+    {
+      "id": "S16.debug-off-by-default",
+      "design": ["S16"],
+      "title": "Without RASK_LOG the SDK logs no traffic",
+      "calls": [{ "op": "getMe" }],
+      "wire": [{ "assert": "count", "equals": 1 }],
+      "expect_sdk": [{ "kind": "logs", "empty": true }]
+    },
+    {
+      "id": "S17.browser-refused",
+      "design": ["S17"],
+      "languages": ["typescript"],
+      "title": "TypeScript refuses to run in a browser unless dangerouslyAllowBrowser: true",
+      "wire": [{ "assert": "count", "equals": 0 }],
+      "expect_sdk": [
+        { "kind": "manual", "text": "With window and document defined, new Rask(...) throws an error naming dangerouslyAllowBrowser; with dangerouslyAllowBrowser: true it constructs." }
+      ]
+    }
+  ]
+}

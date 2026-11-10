@@ -1,0 +1,9 @@
+{
+  "description": "Copy of the committed API v3 contract. To update: copy the file, set commit and sha256 here, run npm test.",
+  "repository": "localization_app",
+  "branch": "main",
+  "path": "localization/contracts/v3/spec/openapi.json",
+  "commit": "c9b3b704",
+  "last_changed_in": "453e96cf",
+  "sha256": "2de520d050217963d252b0e11aa843131c4f576b0118c456c32184a7e31a460b"
+}

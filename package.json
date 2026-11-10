@@ -1,0 +1,22 @@
+{
+  "name": "rask-sdk-acceptance",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Language-neutral acceptance harness for the Rask API v3 SDKs: contract-validating mock, control API and the S1-S17 scenario list.",
+  "type": "module",
+  "bin": {
+    "rask-sdk-acceptance": "bin/rask-sdk-acceptance.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/rask-sdk-acceptance.mjs",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
+  }
+}
